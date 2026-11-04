@@ -1,0 +1,88 @@
+# wafer-spark-pipeline - M1/M2
+# Spark: apache/spark:3.5.9-python3 (official 3.5 LTS image, includes python3)
+# Oracle: gvenzl/oracle-free:23, same schema/seed as the oracle-sql-lab project,
+#         so the Spark outputs can be compared against the SQL results 1:1.
+services:
+  oracle:
+    image: gvenzl/oracle-free:23
+    container_name: wafer-oracle
+    ports:
+      - "1521:1521"
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-OrclDev#2026}
+      APP_USER: ${APP_USER:-sqluser}
+      APP_USER_PASSWORD: ${APP_USER_PASSWORD:-SqlDev#2026}
+    volumes:
+      - oradata:/opt/oracle/oradata
+      - ./oracle/db:/container-entrypoint-initdb.d:ro
+      - ./oracle/schema:/schema:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 20s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    shm_size: 1g
+    tty: true
+
+  spark-master:
+    image: apache/spark:3.5.9-python3
+    container_name: spark-master
+    entrypoint: ["/opt/spark/bin/spark-class"]
+    command:
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./data:/data
+
+  spark-worker:
+    image: apache/spark:3.5.9-python3
+    container_name: spark-worker
+    entrypoint: ["/opt/spark/bin/spark-class"]
+    command:
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark-master:7077
+      - --cores
+      - "2"
+      - --memory
+      - 3g
+      - --webui-port
+      - "8081"
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data:/data
+      - ./jobs:/opt/jobs
+      - ./jars:/opt/jars
+
+  spark-client:
+    image: apache/spark:3.5.9-python3
+    container_name: spark-client
+    entrypoint: ["tail", "-f", "/dev/null"]
+    depends_on:
+      - spark-master
+    ports:
+      - "4040:4040"
+    environment:
+      ORACLE_HOST: oracle
+      ORACLE_PORT: "1521"
+      ORACLE_SERVICE: FREEPDB1
+      ORACLE_USER: ${APP_USER:-sqluser}
+      ORACLE_PASSWORD: ${APP_USER_PASSWORD:-SqlDev#2026}
+    volumes:
+      - ./data:/data
+      - ./jobs:/opt/jobs
+      - ./jars:/opt/jars
+
+volumes:
+  oradata:
