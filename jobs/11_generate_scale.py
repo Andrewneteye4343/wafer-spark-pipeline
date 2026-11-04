@@ -49,9 +49,14 @@ def build_lots(spark: SparkSession) -> DataFrame:
             .otherwise("NORMAL")
             .alias("priority"),
             (F.col("id") % 25 + 1).cast("int").alias("qty_wafers"),
+            # Spread wafer start times across the whole day: id % seconds only
+            # reaches ~1h40m because N_LOTS is small, which made every hour in
+            # the load curve identical. Hashing the id fixes the distribution
+            # while staying deterministic.
             F.to_timestamp(
                 F.from_unixtime(
-                    F.lit(EPOCH_2026_01_01) + F.col("id") % F.lit(DAYS * 86400)
+                    F.lit(EPOCH_2026_01_01)
+                    + F.abs(F.xxhash64(F.col("id"))) % F.lit(DAYS * 86400)
                 )
             ).alias("wafer_start_ts"),
         )
