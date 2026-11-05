@@ -34,9 +34,13 @@ def lower_columns(df: DataFrame) -> DataFrame:
 
 
 def build_silver(events: DataFrame, wafer: DataFrame, lot: DataFrame) -> DataFrame:
+    # LEFT joins on purpose: an INNER join would silently drop events whose
+    # wafer is missing, so the row-count guard below would fail with no clue
+    # about which rows were bad. With LEFT joins the rows survive (lot_id NULL)
+    # and the DQ gate gets to decide - that is where data quality belongs.
     return (
-        events.join(F.broadcast(wafer), "wafer_id", "inner")
-        .join(F.broadcast(lot), "lot_id", "inner")
+        events.join(F.broadcast(wafer), "wafer_id", "left")
+        .join(F.broadcast(lot), "lot_id", "left")
         .withColumn(
             "dur_sec",
             F.when(F.col("out_ts").isNull(), F.lit(None).cast("long"))

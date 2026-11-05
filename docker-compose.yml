@@ -83,6 +83,23 @@ services:
       - ./data:/data
       - ./jobs:/opt/jobs
       - ./jars:/opt/jars
+      - ./pipeline:/opt/pipeline
+
+  scheduler:
+    image: apache/spark:3.5.9-python3
+    container_name: spark-scheduler
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["bash /opt/pipeline/scheduler.sh"]
+    depends_on:
+      - spark-master
+    environment:
+      RUN_EVERY_SECONDS: ${RUN_EVERY_SECONDS:-86400}
+      RUN_GENERATE: ${RUN_GENERATE:-0}
+    volumes:
+      - ./data:/data
+      - ./jobs:/opt/jobs
+      - ./jars:/opt/jars
+      - ./pipeline:/opt/pipeline
 
 volumes:
   oradata:
