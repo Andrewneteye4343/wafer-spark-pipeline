@@ -14,12 +14,22 @@ LOG="$OPS/run_$RUN_ID.log"
 HIST="$OPS/run_history.jsonl"
 QUAR=/data/lake/quarantine
 mkdir -p "$OPS" "$QUAR"
+export RUN_ID   # so jobs can name their quarantine folders after the run
 
 SPARK="/opt/spark/bin/spark-submit --master spark://spark-master:7077"
 SPARK="$SPARK --conf spark.driver.host=spark-client --conf spark.driver.bindAddress=0.0.0.0"
 SPARK="$SPARK --conf spark.driver.memory=1g --conf spark.executor.memory=2g"
 SPARK="$SPARK --conf spark.executor.cores=1 --conf spark.sql.shuffle.partitions=8"
 if [ -f /opt/jars/ojdbc11.jar ]; then SPARK="$SPARK --jars /opt/jars/ojdbc11.jar"; fi
+
+alert() {  # status detail
+  local msg="[$1] run=$RUN_ID $2"
+  echo "[alert] $msg $(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$OPS/alerts.log"
+  if [ -n "${N8N_WEBHOOK_URL:-}" ] && command -v curl >/dev/null 2>&1; then
+    curl -s -X POST -H 'Content-Type: application/json' \
+      -d "{\"text\":\"$msg\"}" "$N8N_WEBHOOK_URL" >/dev/null || true
+  fi
+}
 
 log_json() {  # step job status exit_code duration_sec
   printf '{"run_id":"%s","step":"%s","job":"%s","status":"%s","exit_code":%s,"duration_sec":%s,"ts":"%s"}\n' \
@@ -40,10 +50,12 @@ run_step() {  # name job
   elif [ "$rc" -eq 2 ]; then
     echo "=== $name FAILED_DQ (${dur}s) - see $QUAR" | tee -a "$LOG"
     log_json "$name" "$job" "FAILED_DQ" "$rc" "$dur"
+    alert FAILED_DQ "step=$name job=$job exit=2 durations=${dur}s"
     exit 2
   else
     echo "=== $name FAILED rc=$rc (${dur}s)" | tee -a "$LOG"
     log_json "$name" "$job" "FAILED" "$rc" "$dur"
+    alert FAILED "step=$name job=$job exit=$rc duration=${dur}s"
     exit "$rc"
   fi
 }
@@ -58,6 +70,7 @@ run_step ingest 10_ingest_bronze.py
 run_step silver 20_build_silver.py
 run_step dq     40_dq_gate.py
 run_step gold   30_build_gold.py
+run_step report 50_build_report.py
 
 echo "--- pipeline run $RUN_ID finished OK" | tee -a "$LOG"
 exit 0
